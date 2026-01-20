@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, date
+import urllib.parse
 
 # Set Page Config
 st.set_page_config(page_title="Staff Manager", layout="centered")
@@ -15,10 +16,9 @@ if 'emp_data' not in st.session_state:
 if 'attendance' not in st.session_state:
     st.session_state.attendance = pd.DataFrame(columns=["Date", "Name", "Status"])
 
-# --- MAIN INTERFACE ---
-st.title("📌 Staff Attendance")
+st.title("📌 Staff Attendance & Payroll")
 
-# Step 1: Mark Attendance
+# --- MARK ATTENDANCE ---
 with st.container(border=True):
     selected_date = st.date_input("1. Select Date", date.today())
     date_str = selected_date.strftime("%Y-%m-%d")
@@ -26,7 +26,6 @@ with st.container(border=True):
     status_type = st.radio("3. Select Attendance Type", ["Present", "Half-Day", "Leave"], horizontal=True)
 
     if st.button("Submit Attendance", type="primary", use_container_width=True):
-        # Clear existing entry for that day/person to avoid duplicates
         st.session_state.attendance = st.session_state.attendance[
             ~((st.session_state.attendance["Date"] == date_str) & 
               (st.session_state.attendance["Name"] == emp_name))
@@ -42,77 +41,59 @@ with st.container(border=True):
 st.divider()
 
 # --- REPORTS SECTION ---
-st.header("📊 Reports & History")
+st.header("📊 Reports & Sharing")
+rep_tab1, rep_tab2, rep_tab3 = st.tabs(["💰 Monthly Summary", "📅 Monthly Log", "👤 Send Employee Report"])
 
-# Tabs for different report views
-rep_tab1, rep_tab2, rep_tab3 = st.tabs(["💰 Monthly Summary", "📅 Monthly Log", "👤 Employee History"])
+# Global Month/Year for consistency
+sum_month = st.sidebar.selectbox("Current View Month", ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"], index=date.today().month - 1)
+sum_year = st.sidebar.selectbox("Current View Year", [2025, 2026], index=1)
+m_num = datetime.strptime(sum_month, "%B").month
+
+# Calculation Logic Helper
+def get_emp_report(name, m, y):
+    base = st.session_state.emp_data[st.session_state.emp_data["Name"] == name]["Base_Salary"].values[0]
+    df = st.session_state.attendance.copy()
+    if df.empty:
+        return 0, 1000, 0, base + 1000, []
+    
+    df['Date'] = pd.to_datetime(df['Date'])
+    month_data = df[(df['Date'].dt.month == m) & (df['Date'].dt.year == y) & (df['Name'] == name)]
+    
+    leaves_dates = month_data[month_data["Status"] == "Leave"]["Date"].dt.strftime('%d-%m').tolist()
+    halfs_dates = month_data[month_data["Status"] == "Half-Day"]["Date"].dt.strftime('%d-%m').tolist()
+    
+    total_l = len(leaves_dates) + (len(halfs_dates) * 0.5)
+    bonus = 1000 if total_l == 0 else 0
+    unpaid = max(0.0, total_l - 1.0)
+    deduction = round(unpaid * (base / 26))
+    final = round(base + bonus - deduction)
+    
+    return total_l, bonus, deduction, final, {"Leaves": leaves_dates, "Half-Days": halfs_dates}
 
 with rep_tab1:
-    st.subheader("Monthly Salary Calculation")
-    c1, c2 = st.columns(2)
-    with c1:
-        sum_month = st.selectbox("Month", ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"], index=date.today().month - 1, key="sum_m")
-    with c2:
-        sum_year = st.selectbox("Year", [2024, 2025, 2026, 2027], index=2, key="sum_y")
-    
-    m_num = datetime.strptime(sum_month, "%B").month
-    
-    def calculate_payout(row):
-        df = st.session_state.attendance.copy()
-        if df.empty: 
-            return pd.Series([0.0, 1000, 0, row["Base_Salary"] + 1000])
-        
-        df['Date'] = pd.to_datetime(df['Date'])
-        month_data = df[(df['Date'].dt.month == m_num) & (df['Date'].dt.year == sum_year) & (df['Name'] == row['Name'])]
-        
-        l_count = (month_data["Status"] == "Leave").sum() * 1.0
-        h_count = (month_data["Status"] == "Half-Day").sum() * 0.5
-        total_l = l_count + h_count
-        
-        bonus = 1000 if total_l == 0 else 0
-        unpaid = max(0.0, total_l - 1.0)
-        daily = row["Base_Salary"] / 26
-        deduction = unpaid * daily
-        
-        return pd.Series([total_l, bonus, round(deduction), round(row["Base_Salary"] + bonus - deduction)])
-
     summary = st.session_state.emp_data.copy()
-    summary[["Leaves", "Bonus", "Deduction", "Final Pay"]] = summary.apply(calculate_payout, axis=1)
+    summary[["Leaves", "Bonus", "Deduction", "Final Pay"]] = summary.apply(lambda r: pd.Series(get_emp_report(r["Name"], m_num, sum_year)[:4]), axis=1)
     st.dataframe(summary, use_container_width=True, hide_index=True)
 
-with rep_tab2:
-    st.subheader(f"Date-wise Log: {sum_month}")
-    df_log = st.session_state.attendance.copy()
-    if not df_log.empty:
-        df_log['Date'] = pd.to_datetime(df_log['Date'])
-        filtered_log = df_log[(df_log['Date'].dt.month == m_num) & (df_log['Date'].dt.year == sum_year)]
-        
-        if not filtered_log.empty:
-            # Format date for cleaner viewing
-            display_log = filtered_log.copy()
-            display_log['Date'] = display_log['Date'].dt.strftime('%d-%m-%Y')
-            st.table(display_log.sort_values(by="Date", ascending=False))
-        else:
-            st.info("No leave records found for this specific month.")
-    else:
-        st.info("No records found in the system yet.")
-
 with rep_tab3:
-    st.subheader("Individual Employee Record")
-    target_name = st.selectbox("Select Employee", st.session_state.emp_data["Name"])
-    
-    personal_history = st.session_state.attendance[st.session_state.attendance["Name"] == target_name]
-    
-    if not personal_history.empty:
-        st.write(f"Showing all recorded absences for **{target_name}**")
-        st.table(personal_history.sort_values(by="Date", ascending=False))
-        
-        # Add a download button for this specific person
-        csv = personal_history.to_csv(index=False).encode('utf-8')
-        st.download_button(f"Download {target_name}'s Report", csv, f"{target_name}_report.csv", "text/csv")
-    else:
-        st.info(f"No leave records found for {target_name}.")
+    target = st.selectbox("Select Employee to Notify", st.session_state.emp_data["Name"])
+    l_count, bonus, ded, final, dates = get_emp_report(target, m_num, sum_year)
+    base_sal = st.session_state.emp_data[st.session_state.emp_data["Name"] == target]["Base_Salary"].values[0]
 
-# Settings
-with st.expander("⚙️ Settings: Edit Base Salaries"):
-    st.session_state.emp_data = st.data_editor(st.session_state.emp_data, num_rows="fixed")
+    # Generate Message Text
+    msg = f"Salary Report for {target} ({sum_month} {sum_year})\n\n"
+    msg += f"Base Salary: ₹{base_sal}\n"
+    msg += f"Total Leaves: {l_count}\n"
+    if dates["Leaves"]: msg += f"• Full Leaves: {', '.join(dates['Leaves'])}\n"
+    if dates["Half-Days"]: msg += f"• Half-Days: {', '.join(dates['Half-Days'])}\n"
+    
+    msg += f"\n--- Calculation ---\n"
+    msg += f"Bonus (0 leaves): +₹{bonus}\n"
+    msg += f"Deduction (after 1 paid leave): -₹{ded}\n"
+    msg += f"Final Payout: ₹{final}\n"
+
+    st.code(msg) # Shows the preview
+
+    # WhatsApp Link
+    whatsapp_url = f"https://wa.me/?text={urllib.parse.quote(msg)}"
+    st.link_button("📲 Send via WhatsApp", whatsapp_url, use_container_width=True)
