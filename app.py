@@ -107,7 +107,7 @@ with rep_tab4:
 
 *Calculation:*
 - Paid Leave Allowed: 1 day
-- Paid Bonus (0 leaves): ₹{bonus}
+- Paid Bonus: ₹{bonus}
 - Deduction: ₹{deduct} (for {max(0.0, total_l-1)} unpaid days)
 
 *FINAL PAYOUT: ₹{final}*
