@@ -61,7 +61,7 @@ with tab1:
                     
                     # --- POPUP CONFIRMATION ---
                     st.toast(f"✅ Attendance updated for {name} on {date_str}!", icon="🎉")
-                    st.success(f"Saved: {name} is {status_input}")
+                    st.success(f"Saved: {name} is on {status_input}")
 
 # --- TAB 2: MONTHLY SUMMARY ---
 with tab2:
